@@ -45,32 +45,43 @@ if uploaded_file:
             
             try:
                 # PASO 1: RESTAURACIÓN (CodeFormer)
-                status.write("1️⃣ Buscando la mejor IA de restauración...")
-                # Buscamos el modelo y tomamos la ID de la versión más reciente automáticamente
+                status.write("1️⃣ Restaurando rostro en HD...")
                 model_codeformer = replicate.models.get("sczhou/codeformer")
                 version_codeformer = model_codeformer.versions.list()[0]
                 
-                status.write("✨ Restaurando rostro en HD...")
-                # USAMOS replicate.run CON LA VERSIÓN DINÁMICA
                 output_restoration = replicate.run(
                     f"sczhou/codeformer:{version_codeformer.id}",
                     input={"image": uploaded_file, "upscale": 2, "face_upsample": True}
                 )
                 
+                # --- CORRECCIÓN DEL ERROR ---
+                # Convertimos la salida de la IA 1 en bytes reales para la IA 2
+                if hasattr(output_restoration, "read"):
+                    restored_data = output_restoration.read()
+                else:
+                    # Por si acaso devuelve una URL (string)
+                    restored_data = requests.get(str(output_restoration)).content
+                
+                # Creamos un archivo en memoria
+                archivo_intermedio = BytesIO(restored_data)
+
                 # PASO 2: QUITAR FONDO (Rembg)
-                status.write("2️⃣ Buscando especialista en quitar fondos...")
+                status.write("2️⃣ Eliminando fondo...")
                 model_rembg = replicate.models.get("cjwbw/rembg")
                 version_rembg = model_rembg.versions.list()[0]
                 
-                status.write("✂️ Recortando fondo...")
                 output_rembg = replicate.run(
                     f"cjwbw/rembg:{version_rembg.id}",
-                    input={"image": output_restoration}
+                    input={"image": archivo_intermedio} # Ahora sí pasamos un archivo válido
                 )
 
-                # Descargar la imagen resultante de la IA
-                response = requests.get(output_rembg)
-                img_ia = Image.open(BytesIO(response.content))
+                # Leer la salida final también
+                if hasattr(output_rembg, "read"):
+                    final_data = output_rembg.read()
+                else:
+                    final_data = requests.get(str(output_rembg)).content
+
+                img_ia = Image.open(BytesIO(final_data))
                 
                 # PASO 3: AJUSTES PARA LÁSER
                 status.write("3️⃣ Aplicando ajustes para acero inoxidable...")
@@ -85,7 +96,8 @@ if uploaded_file:
                 # MOSTRAR RESULTADO
                 st.divider()
                 st.subheader("Resultado Final (Listo para LightBurn)")
-                st.image(img_final, use_column_width=True)
+                # Fondo grisáceo para ver transparencia
+                st.image(img_final, use_column_width=True, caption="Fondo Transparente")
                 
                 # BOTÓN DE DESCARGA
                 buf = BytesIO()
@@ -101,3 +113,4 @@ if uploaded_file:
 
             except Exception as e:
                 st.error(f"Ocurrió un error técnico: {e}")
+                st.write("Detalle del error:", str(e)) # Ayuda a ver qué pasa
