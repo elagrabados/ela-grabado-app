@@ -44,26 +44,28 @@ if uploaded_file:
         with st.status("🤖 La IA está trabajando...", expanded=True) as status:
             
             try:
-                # PASO 1: RESTAURACIÓN (Buscando versión automática)
+                # PASO 1: RESTAURACIÓN (CodeFormer)
                 status.write("1️⃣ Buscando la mejor IA de restauración...")
-                model_restoration = replicate.models.get("sczhou/codeformer")
-                version_restoration = model_restoration.versions.list()[0] # Usa la última versión siempre
+                # Buscamos el modelo y tomamos la ID de la versión más reciente automáticamente
+                model_codeformer = replicate.models.get("sczhou/codeformer")
+                version_codeformer = model_codeformer.versions.list()[0]
                 
                 status.write("✨ Restaurando rostro en HD...")
-                output_restoration = version_restoration.predict(
-                    image=uploaded_file, 
-                    upscale=2, 
-                    face_upsample=True
+                # USAMOS replicate.run CON LA VERSIÓN DINÁMICA
+                output_restoration = replicate.run(
+                    f"sczhou/codeformer:{version_codeformer.id}",
+                    input={"image": uploaded_file, "upscale": 2, "face_upsample": True}
                 )
                 
-                # PASO 2: QUITAR FONDO (Buscando versión automática)
+                # PASO 2: QUITAR FONDO (Rembg)
                 status.write("2️⃣ Buscando especialista en quitar fondos...")
                 model_rembg = replicate.models.get("cjwbw/rembg")
-                version_rembg = model_rembg.versions.list()[0] # Usa la última versión siempre
+                version_rembg = model_rembg.versions.list()[0]
                 
                 status.write("✂️ Recortando fondo...")
-                output_rembg = version_rembg.predict(
-                    image=output_restoration
+                output_rembg = replicate.run(
+                    f"cjwbw/rembg:{version_rembg.id}",
+                    input={"image": output_restoration}
                 )
 
                 # Descargar la imagen resultante de la IA
