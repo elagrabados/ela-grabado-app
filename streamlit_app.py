@@ -86,4 +86,73 @@ if uploaded_file:
                     
                     # Caso A: Es una URL (String)
                     if isinstance(output_upscale, str):
-                        resp = requests.get(output_ups
+                        resp = requests.get(output_upscale)
+                        buffer_hd.write(resp.content)
+                    
+                    # Caso B: Es un Generador/Iterador (FileOutput) -> AQUÍ FALLABA ANTES
+                    elif hasattr(output_upscale, '__iter__') and not hasattr(output_upscale, 'read'):
+                        for chunk in output_upscale:
+                            buffer_hd.write(chunk)
+                            
+                    # Caso C: Es un archivo abierto
+                    elif hasattr(output_upscale, 'read'):
+                        buffer_hd.write(output_upscale.read())
+                    
+                    buffer_hd.seek(0) # Rebobinar al principio
+                    img_input = buffer_hd # Actualizamos la entrada para el siguiente paso
+                    # -----------------------------------------------
+
+                # PASO 2: CORTE CON BRIA AI
+                status.write("2️⃣ Recortando con precisión de estudio (Bria)...")
+                
+                output_bria = replicate.run(
+                    "bria/remove-background",
+                    input={
+                        "image": img_input, # Ahora sí recibe un archivo limpio
+                        "preserve_alpha": True
+                    }
+                )
+
+                # LEER RESULTADO BRIA
+                buffer_bg = BytesIO()
+                if isinstance(output_bria, str):
+                    response = requests.get(output_bria)
+                    buffer_bg.write(response.content)
+                elif hasattr(output_bria, 'read'):
+                    buffer_bg.write(output_bria.read())
+                elif hasattr(output_bria, '__iter__'): # Por seguridad agregamos esto también
+                    for chunk in output_bria:
+                        buffer_bg.write(chunk)
+                
+                buffer_bg.seek(0)
+                img_sin_fondo = Image.open(buffer_bg)
+                
+                # PASO 3: AJUSTES FINALES
+                status.write("3️⃣ Finalizando para acero inoxidable...")
+                
+                img_proc = img_sin_fondo.convert("RGBA")
+                
+                enhancer_c = ImageEnhance.Contrast(img_proc)
+                img_proc = enhancer_c.enhance(contraste)
+
+                enhancer_s = ImageEnhance.Sharpness(img_proc)
+                img_proc = enhancer_s.enhance(nitidez)
+
+                status.update(label="✅ ¡Imagen HD Lista!", state="complete", expanded=False)
+                
+                # MOSTRAR RESULTADO
+                st.divider()
+                st.subheader("Resultado Final HD")
+                st.markdown("""<style>[data-testid="stImage"] {background-color: #e0e0e0;}</style>""", unsafe_allow_html=True)
+                st.image(img_proc, use_column_width=True, caption="Listo para LightBurn")
+                
+                # DESCARGA
+                buf = BytesIO()
+                img_proc.save(buf, format="PNG")
+                byte_im = buf.getvalue()
+                
+                st.download_button("⬇️ DESCARGAR PNG HD", data=byte_im, file_name="ela_pro_final.png", mime="image/png")
+
+            except Exception as e:
+                st.error(f"Ocurrió un error técnico: {e}")
+                st.write(f"Tipo de dato problemático: {type(output_upscale) if 'output_upscale' in locals() else 'Desconocido'}")
