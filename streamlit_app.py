@@ -16,7 +16,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<h1 class="main-title">Ela Grabado de Joyería</h1>', unsafe_allow_html=True)
-st.info("✨ Sistema Avanzado: Restauración HD + Recorte de Precisión (Matting)")
+st.info("✨ Estrategia Nueva: Real-ESRGAN (Bordes Duros) + Recorte Inteligente")
 
 # --- BARRA LATERAL ---
 with st.sidebar:
@@ -44,39 +44,39 @@ if uploaded_file:
         with st.status("🤖 La IA está trabajando...", expanded=True) as status:
             
             try:
-                # PASO 1: RESTAURACIÓN (CodeFormer)
-                status.write("1️⃣ Restaurando rostro en HD...")
-                # Obtenemos la última versión del modelo de restauración
-                model_codeformer = replicate.models.get("sczhou/codeformer")
-                version_codeformer = model_codeformer.versions.list()[0]
+                # PASO 1: ESCALADO DE ALTA FIDELIDAD (Real-ESRGAN)
+                # Cambiamos CodeFormer por Real-ESRGAN para no perder la textura de la ropa
+                status.write("1️⃣ Aumentando resolución respetando bordes (Real-ESRGAN)...")
                 
-                output_restoration = replicate.run(
-                    f"sczhou/codeformer:{version_codeformer.id}",
-                    input={"image": uploaded_file, "upscale": 2, "face_upsample": True}
+                model_esrgan = replicate.models.get("nightmareai/real-esrgan")
+                version_esrgan = model_esrgan.versions.list()[0]
+                
+                output_upscale = replicate.run(
+                    f"nightmareai/real-esrgan:{version_esrgan.id}",
+                    input={"image": uploaded_file, "scale": 2, "face_enhance": True}
                 )
                 
-                # --- PUENTE SEGURO (Prepara la imagen para el siguiente paso) ---
-                buffer_restaurado = BytesIO()
-                if hasattr(output_restoration, 'read'):
-                    buffer_restaurado.write(output_restoration.read())
-                elif hasattr(output_restoration, '__iter__'):
-                    for chunk in output_restoration:
-                        buffer_restaurado.write(chunk)
+                # --- PUENTE SEGURO ---
+                buffer_upscale = BytesIO()
+                if hasattr(output_upscale, 'read'):
+                    buffer_upscale.write(output_upscale.read())
+                elif hasattr(output_upscale, '__iter__'):
+                    for chunk in output_upscale:
+                        buffer_upscale.write(chunk)
                 else:
-                    response = requests.get(str(output_restoration))
-                    buffer_restaurado.write(response.content)
-                buffer_restaurado.seek(0)
-                # ------------------------------------------------------------
+                    response = requests.get(str(output_upscale))
+                    buffer_upscale.write(response.content)
+                buffer_upscale.seek(0)
+                # ---------------------
 
-                # PASO 2: QUITAR FONDO (NUEVO MODELO ESPECIALIZADO: MODNet)
-                status.write("2️⃣ Aplicando recorte de alta precisión (Human Matting)...")
-                # Obtenemos la última versión del nuevo modelo especializado
-                model_modnet = replicate.models.get("yu45020/modnet")
-                version_modnet = model_modnet.versions.list()[0]
+                # PASO 2: QUITAR FONDO (Volvemos a Lucataco que es rápido y bueno si la entrada es nítida)
+                status.write("2️⃣ Recortando fondo...")
+                model_rembg = replicate.models.get("lucataco/remove-bg")
+                version_rembg = model_rembg.versions.list()[0]
                 
                 output_rembg = replicate.run(
-                    f"yu45020/modnet:{version_modnet.id}",
-                    input={"image": buffer_restaurado}
+                    f"lucataco/remove-bg:{version_rembg.id}",
+                    input={"image": buffer_upscale}
                 )
 
                 # Leemos el resultado final
@@ -87,11 +87,9 @@ if uploaded_file:
                     for chunk in output_rembg:
                         buffer_final.write(chunk)
                 else:
-                    # MODNet a veces devuelve la imagen directa, no una URL
                     response = requests.get(str(output_rembg))
                     buffer_final.write(response.content)
                 
-                buffer_final.seek(0)
                 img_ia = Image.open(buffer_final)
                 
                 # PASO 3: AJUSTES PARA LÁSER
@@ -107,9 +105,7 @@ if uploaded_file:
                 # MOSTRAR RESULTADO
                 st.divider()
                 st.subheader("Resultado Final (Listo para LightBurn)")
-                # Mostramos sobre un fondo de cuadrícula para verificar la transparencia
-                st.markdown('Your image is ready! Right-click and save as PNG.')
-                st.image(img_final, use_column_width=True, caption="Fondo Transparente Perfecto")
+                st.image(img_final, use_column_width=True, caption="Fondo Transparente")
                 
                 # BOTÓN DE DESCARGA
                 buf = BytesIO()
@@ -125,4 +121,4 @@ if uploaded_file:
 
             except Exception as e:
                 st.error(f"Ocurrió un error técnico: {e}")
-                st.write(f"Detalle del error: {str(e)}")
+                st.write(f"Detalle: {str(e)}")
