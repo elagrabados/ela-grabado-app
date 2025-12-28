@@ -16,7 +16,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<h1 class="main-title">Ela Grabado de Joyería</h1>', unsafe_allow_html=True)
-st.info("✨ Estrategia Nueva: Real-ESRGAN (Bordes Duros) + Recorte Inteligente")
+st.info("✨ Estrategia Definitiva: Real-ESRGAN (ID Fijo) + Lucataco")
 
 # --- BARRA LATERAL ---
 with st.sidebar:
@@ -45,14 +45,11 @@ if uploaded_file:
             
             try:
                 # PASO 1: ESCALADO DE ALTA FIDELIDAD (Real-ESRGAN)
-                # Cambiamos CodeFormer por Real-ESRGAN para no perder la textura de la ropa
+                # Usamos el ID FIJO para evitar errores de búsqueda
                 status.write("1️⃣ Aumentando resolución respetando bordes (Real-ESRGAN)...")
                 
-                model_esrgan = replicate.models.get("nightmareai/real-esrgan")
-                version_esrgan = model_esrgan.versions.list()[0]
-                
                 output_upscale = replicate.run(
-                    f"nightmareai/real-esrgan:{version_esrgan.id}",
+                    "nightmareai/real-esrgan:42fed1c4974146d4d2414e2be2c5277c7fcf05fcc3a73abf41610695738c1d7b",
                     input={"image": uploaded_file, "scale": 2, "face_enhance": True}
                 )
                 
@@ -69,13 +66,12 @@ if uploaded_file:
                 buffer_upscale.seek(0)
                 # ---------------------
 
-                # PASO 2: QUITAR FONDO (Volvemos a Lucataco que es rápido y bueno si la entrada es nítida)
+                # PASO 2: QUITAR FONDO (Lucataco)
+                # Usamos el ID FIJO también aquí para seguridad total
                 status.write("2️⃣ Recortando fondo...")
-                model_rembg = replicate.models.get("lucataco/remove-bg")
-                version_rembg = model_rembg.versions.list()[0]
                 
                 output_rembg = replicate.run(
-                    f"lucataco/remove-bg:{version_rembg.id}",
+                    "lucataco/remove-bg:95fcc2a26d3899cd6c2691c900465aaeff466285a65c14638cc5f36f34befaf1",
                     input={"image": buffer_upscale}
                 )
 
