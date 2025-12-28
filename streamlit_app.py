@@ -16,7 +16,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<h1 class="main-title">Ela Grabado de Joyería</h1>', unsafe_allow_html=True)
-st.info("✨ Sistema Inteligente: Restauración de Rostros + Fondo Transparente")
+st.info("✨ Sistema Avanzado: Restauración HD + Recorte de Precisión (Matting)")
 
 # --- BARRA LATERAL ---
 with st.sidebar:
@@ -46,6 +46,7 @@ if uploaded_file:
             try:
                 # PASO 1: RESTAURACIÓN (CodeFormer)
                 status.write("1️⃣ Restaurando rostro en HD...")
+                # Obtenemos la última versión del modelo de restauración
                 model_codeformer = replicate.models.get("sczhou/codeformer")
                 version_codeformer = model_codeformer.versions.list()[0]
                 
@@ -54,7 +55,7 @@ if uploaded_file:
                     input={"image": uploaded_file, "upscale": 2, "face_upsample": True}
                 )
                 
-                # --- PUENTE SEGURO ---
+                # --- PUENTE SEGURO (Prepara la imagen para el siguiente paso) ---
                 buffer_restaurado = BytesIO()
                 if hasattr(output_restoration, 'read'):
                     buffer_restaurado.write(output_restoration.read())
@@ -65,16 +66,16 @@ if uploaded_file:
                     response = requests.get(str(output_restoration))
                     buffer_restaurado.write(response.content)
                 buffer_restaurado.seek(0)
-                # ---------------------
+                # ------------------------------------------------------------
 
-                # PASO 2: QUITAR FONDO (NUEVO MODELO MEJORADO)
-                status.write("2️⃣ Eliminando fondo con precisión quirúrgica...")
-                # CAMBIO CLAVE: Usamos un modelo diferente y más preciso
-                model_rembg_pro = replicate.models.get("lucataco/remove-bg")
-                version_rembg_pro = model_rembg_pro.versions.list()[0]
+                # PASO 2: QUITAR FONDO (NUEVO MODELO ESPECIALIZADO: MODNet)
+                status.write("2️⃣ Aplicando recorte de alta precisión (Human Matting)...")
+                # Obtenemos la última versión del nuevo modelo especializado
+                model_modnet = replicate.models.get("yu45020/modnet")
+                version_modnet = model_modnet.versions.list()[0]
                 
                 output_rembg = replicate.run(
-                    f"lucataco/remove-bg:{version_rembg_pro.id}",
+                    f"yu45020/modnet:{version_modnet.id}",
                     input={"image": buffer_restaurado}
                 )
 
@@ -86,9 +87,11 @@ if uploaded_file:
                     for chunk in output_rembg:
                         buffer_final.write(chunk)
                 else:
+                    # MODNet a veces devuelve la imagen directa, no una URL
                     response = requests.get(str(output_rembg))
                     buffer_final.write(response.content)
                 
+                buffer_final.seek(0)
                 img_ia = Image.open(buffer_final)
                 
                 # PASO 3: AJUSTES PARA LÁSER
@@ -104,7 +107,9 @@ if uploaded_file:
                 # MOSTRAR RESULTADO
                 st.divider()
                 st.subheader("Resultado Final (Listo para LightBurn)")
-                st.image(img_final, use_column_width=True, caption="Fondo Transparente")
+                # Mostramos sobre un fondo de cuadrícula para verificar la transparencia
+                st.markdown('Your image is ready! Right-click and save as PNG.')
+                st.image(img_final, use_column_width=True, caption="Fondo Transparente Perfecto")
                 
                 # BOTÓN DE DESCARGA
                 buf = BytesIO()
@@ -120,4 +125,4 @@ if uploaded_file:
 
             except Exception as e:
                 st.error(f"Ocurrió un error técnico: {e}")
-                st.write(f"Detalle: {str(e)}")
+                st.write(f"Detalle del error: {str(e)}")
