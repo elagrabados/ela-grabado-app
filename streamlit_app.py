@@ -51,8 +51,9 @@ if uploaded_file:
         with st.status("🤖 Iniciando proceso de alta calidad...", expanded=True) as status:
             
             try:
-                # --- PREPARACIÓN ---
-                img_input = uploaded_file
+                # --- PREPARACIÓN INICIAL ---
+                # Convertimos el archivo subido en bytes para poder manipularlo
+                img_input = BytesIO(uploaded_file.getvalue())
                 
                 # SI SE ACTIVÓ EL FLASH DIGITAL (Slider > 1.0)
                 if ayuda_sombras > 1.0:
@@ -61,6 +62,7 @@ if uploaded_file:
                     enhancer_pre = ImageEnhance.Brightness(img_temp)
                     img_bright = enhancer_pre.enhance(ayuda_sombras)
                     
+                    # Sobrescribimos el input con la versión iluminada
                     buf_bright = BytesIO()
                     img_bright.save(buf_bright, format="PNG")
                     buf_bright.seek(0)
@@ -69,70 +71,19 @@ if uploaded_file:
                 # PASO 1: SUPER RESOLUCIÓN (Real-ESRGAN)
                 if usar_hd:
                     status.write("1️⃣ Aumentando resolución y detalles (Real-ESRGAN)...")
-                    # Usamos una versión específica rápida y efectiva
                     output_upscale = replicate.run(
                         "nightmareai/real-esrgan:42fed1c4974146d4d2414e2be2c5277c7fcf05fcc3a73abf41610695738c1d7b",
                         input={
                             "image": img_input,
                             "scale": 2,
-                            "face_enhance": True # Clave para que los ojos salgan bien en el grabado
+                            "face_enhance": True
                         }
                     )
                     
-                    # Descargar resultado del upscale
-                    if hasattr(output_upscale, 'read'):
-                        img_input = output_upscale
-                    else:
-                        response = requests.get(str(output_upscale))
-                        buf_upscale = BytesIO(response.content)
-                        img_input = buf_upscale # Pasamos la imagen gigante al siguiente paso
-
-                # PASO 2: CORTE CON BRIA AI
-                status.write("2️⃣ Recortando con precisión de estudio (Bria)...")
-                
-                output_bria = replicate.run(
-                    "bria/remove-background",
-                    input={
-                        "image": img_input,
-                        "preserve_alpha": True
-                    }
-                )
-
-                # LEER RESULTADO
-                buffer_bg = BytesIO()
-                if isinstance(output_bria, str):
-                    response = requests.get(output_bria)
-                    buffer_bg.write(response.content)
-                elif hasattr(output_bria, 'read'):
-                    buffer_bg.write(output_bria.read())
-                
-                img_sin_fondo = Image.open(buffer_bg)
-                
-                # PASO 3: AJUSTES FINALES
-                status.write("3️⃣ Finalizando para acero inoxidable...")
-                
-                img_proc = img_sin_fondo.convert("RGBA")
-                
-                enhancer_c = ImageEnhance.Contrast(img_proc)
-                img_proc = enhancer_c.enhance(contraste)
-
-                enhancer_s = ImageEnhance.Sharpness(img_proc)
-                img_proc = enhancer_s.enhance(nitidez)
-
-                status.update(label="✅ ¡Imagen HD Lista!", state="complete", expanded=False)
-                
-                # MOSTRAR RESULTADO
-                st.divider()
-                st.subheader("Resultado Final HD")
-                st.markdown("""<style>[data-testid="stImage"] {background-color: #e0e0e0;}</style>""", unsafe_allow_html=True)
-                st.image(img_proc, use_column_width=True, caption="Listo para LightBurn")
-                
-                # DESCARGA
-                buf = BytesIO()
-                img_proc.save(buf, format="PNG")
-                byte_im = buf.getvalue()
-                
-                st.download_button("⬇️ DESCARGAR PNG HD", data=byte_im, file_name="ela_pro_final.png", mime="image/png")
-
-            except Exception as e:
-                st.error(f"Ocurrió un error técnico: {e}")
+                    # --- PUENTE DE SEGURIDAD (SOLUCIÓN DEL ERROR) ---
+                    # Convertimos la salida extraña de la IA en un archivo limpio
+                    buffer_hd = BytesIO()
+                    
+                    # Caso A: Es una URL (String)
+                    if isinstance(output_upscale, str):
+                        resp = requests.get(output_ups
