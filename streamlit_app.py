@@ -54,16 +54,26 @@ if uploaded_file:
                     input={"image": uploaded_file, "upscale": 2, "face_upsample": True}
                 )
                 
-                # --- CORRECCIÓN DEL ERROR ---
-                # Convertimos la salida de la IA 1 en bytes reales para la IA 2
-                if hasattr(output_restoration, "read"):
-                    restored_data = output_restoration.read()
-                else:
-                    # Por si acaso devuelve una URL (string)
-                    restored_data = requests.get(str(output_restoration)).content
+                # --- PUENTE SEGURO (SOLUCIÓN DEL ERROR) ---
+                # Convertimos el objeto extraño "FileOutput" en bytes reales
+                buffer_restaurado = BytesIO()
                 
-                # Creamos un archivo en memoria
-                archivo_intermedio = BytesIO(restored_data)
+                # Verificamos si es un archivo directo o una URL
+                if hasattr(output_restoration, 'read'):
+                    # Es un archivo/iterador, lo leemos
+                    buffer_restaurado.write(output_restoration.read())
+                elif hasattr(output_restoration, '__iter__'):
+                     # Es un generador (caso común ahora), lo recorremos
+                    for chunk in output_restoration:
+                        buffer_restaurado.write(chunk)
+                else:
+                    # Es una URL (caso antiguo), la descargamos
+                    response = requests.get(str(output_restoration))
+                    buffer_restaurado.write(response.content)
+                
+                # Rebobinamos el archivo virtual al principio para leerlo
+                buffer_restaurado.seek(0)
+                # -------------------------------------------
 
                 # PASO 2: QUITAR FONDO (Rembg)
                 status.write("2️⃣ Eliminando fondo...")
@@ -72,16 +82,21 @@ if uploaded_file:
                 
                 output_rembg = replicate.run(
                     f"cjwbw/rembg:{version_rembg.id}",
-                    input={"image": archivo_intermedio} # Ahora sí pasamos un archivo válido
+                    input={"image": buffer_restaurado} # Pasamos el buffer limpio
                 )
 
-                # Leer la salida final también
-                if hasattr(output_rembg, "read"):
-                    final_data = output_rembg.read()
+                # Leemos el resultado final (igual que arriba por seguridad)
+                buffer_final = BytesIO()
+                if hasattr(output_rembg, 'read'):
+                    buffer_final.write(output_rembg.read())
+                elif hasattr(output_rembg, '__iter__'):
+                    for chunk in output_rembg:
+                        buffer_final.write(chunk)
                 else:
-                    final_data = requests.get(str(output_rembg)).content
-
-                img_ia = Image.open(BytesIO(final_data))
+                    response = requests.get(str(output_rembg))
+                    buffer_final.write(response.content)
+                
+                img_ia = Image.open(buffer_final)
                 
                 # PASO 3: AJUSTES PARA LÁSER
                 status.write("3️⃣ Aplicando ajustes para acero inoxidable...")
@@ -96,7 +111,6 @@ if uploaded_file:
                 # MOSTRAR RESULTADO
                 st.divider()
                 st.subheader("Resultado Final (Listo para LightBurn)")
-                # Fondo grisáceo para ver transparencia
                 st.image(img_final, use_column_width=True, caption="Fondo Transparente")
                 
                 # BOTÓN DE DESCARGA
@@ -113,4 +127,5 @@ if uploaded_file:
 
             except Exception as e:
                 st.error(f"Ocurrió un error técnico: {e}")
-                st.write("Detalle del error:", str(e)) # Ayuda a ver qué pasa
+                # Imprimir el tipo de error para ayudarte mejor si falla
+                st.write(f"Tipo de dato recibido: {type(output_restoration)}")
