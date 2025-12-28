@@ -21,22 +21,11 @@ st.info("✨ Sistema Inteligente: Restauración de Rostros + Fondo Transparente"
 # --- BARRA LATERAL ---
 with st.sidebar:
     st.header("🎛️ Panel de Control")
-    
-    # Opciones de mejora manual
     st.subheader("Ajustes Finales")
-    nitidez = st.slider("Nitidez (Sharpness)", 0.0, 3.0, 1.5, help="Ayuda a que el láser defina mejor los bordes")
-    contraste = st.slider("Contraste", 0.0, 3.0, 1.2, help="Separa mejor los blancos de los negros")
-    
+    nitidez = st.slider("Nitidez (Sharpness)", 0.0, 3.0, 1.5)
+    contraste = st.slider("Contraste", 0.0, 3.0, 1.2)
     st.divider()
     st.markdown("Desarrollado para **Ela Live Laser Bar**")
-
-# --- FUNCIONES DE IA ---
-def procesar_imagen(image_file):
-    # 1. Subir imagen temporalmente para que Replicate la lea
-    # (En un entorno real de producción, esto se maneja con buffers, 
-    # aquí simplificamos enviando el archivo si la API lo permite o bytes)
-    # Para Streamlit + Replicate, lo más fácil es pasar los bytes.
-    return image_file
 
 # --- INTERFAZ PRINCIPAL ---
 uploaded_file = st.file_uploader("📂 Sube la foto (Idealmente rostros o mascotas)", type=['jpg', 'png', 'jpeg'])
@@ -55,25 +44,33 @@ if uploaded_file:
         with st.status("🤖 La IA está trabajando...", expanded=True) as status:
             
             try:
-                # PASO 1: RESTAURACIÓN DE ROSTRO (CodeFormer)
-                status.write("1️⃣ Restaurando rostro y aumentando calidad (HD)...")
-                output_restoration = replicate.run(
-                    "sczhou/codeformer:7de2ea26c616d5bf2245ad0d5e24f0ff9a6204578a5c876cf52e464032d60a5b",
-                    input={"image": uploaded_file, "upscale": 2, "face_upsample": True}
+                # PASO 1: RESTAURACIÓN (Buscando versión automática)
+                status.write("1️⃣ Buscando la mejor IA de restauración...")
+                model_restoration = replicate.models.get("sczhou/codeformer")
+                version_restoration = model_restoration.versions.list()[0] # Usa la última versión siempre
+                
+                status.write("✨ Restaurando rostro en HD...")
+                output_restoration = version_restoration.predict(
+                    image=uploaded_file, 
+                    upscale=2, 
+                    face_upsample=True
                 )
                 
-                # PASO 2: QUITAR FONDO (Rembg)
-                status.write("2️⃣ Eliminando el fondo quirúrgicamente...")
-                output_rembg = replicate.run(
-                    "cjwbw/rembg:fb8af171cfa1616ddcf1242c093f9c46bcada5ad4cf6f2fbe8b81b330ec5c003",
-                    input={"image": output_restoration}
+                # PASO 2: QUITAR FONDO (Buscando versión automática)
+                status.write("2️⃣ Buscando especialista en quitar fondos...")
+                model_rembg = replicate.models.get("cjwbw/rembg")
+                version_rembg = model_rembg.versions.list()[0] # Usa la última versión siempre
+                
+                status.write("✂️ Recortando fondo...")
+                output_rembg = version_rembg.predict(
+                    image=output_restoration
                 )
 
                 # Descargar la imagen resultante de la IA
                 response = requests.get(output_rembg)
                 img_ia = Image.open(BytesIO(response.content))
                 
-                # PASO 3: AJUSTES PARA LÁSER (Nitidez y Contraste)
+                # PASO 3: AJUSTES PARA LÁSER
                 status.write("3️⃣ Aplicando ajustes para acero inoxidable...")
                 enhancer = ImageEnhance.Sharpness(img_ia)
                 img_sharp = enhancer.enhance(nitidez)
@@ -85,10 +82,7 @@ if uploaded_file:
                 
                 # MOSTRAR RESULTADO
                 st.divider()
-                st.subheader("Resultado Final (Listo para LightBurn/G-Laser)")
-                
-                # Fondo de cuadrícula para ver transparencia
-                st.markdown("*(El fondo de cuadros es para confirmar transparencia)*")
+                st.subheader("Resultado Final (Listo para LightBurn)")
                 st.image(img_final, use_column_width=True)
                 
                 # BOTÓN DE DESCARGA
@@ -104,4 +98,4 @@ if uploaded_file:
                 )
 
             except Exception as e:
-                st.error(f"Ocurrió un error: {e}")
+                st.error(f"Ocurrió un error técnico: {e}")
