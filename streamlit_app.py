@@ -57,13 +57,18 @@ def enviar_a_telegram(imagen_bytes, datos_pedido):
     chat_id = st.secrets["TELEGRAM_CHAT_ID"]
     url = f"https://api.telegram.org/bot{token}/sendDocument"
     
+    # Icono de estado
+    icono_estado = "✅ PAGADO" if datos_pedido['estado'] == "Pagado" else "⛔ PENDIENTE / CRÉDITO"
+    
     mensaje = f"""💎 *NUEVO PEDIDO ELA* 💎
     
+👨‍💼 *Atendido por:* {datos_pedido['vendedor']}
 👤 *Cliente:* {datos_pedido['nombre']}
-📝 *Grabado Reverso:* {datos_pedido['reverso']}
 💍 *Producto:* {datos_pedido['producto']}
+📝 *Reverso:* {datos_pedido['reverso']}
 
-💰 *Pago:* {datos_pedido['metodo_pago']}
+💰 *Estado:* {icono_estado}
+💳 *Método:* {datos_pedido['metodo_pago']}
 💵 *Monto:* {datos_pedido['monto']} {datos_pedido['moneda']}
 {f"🔢 *Ref:* {datos_pedido['referencia']}" if datos_pedido['referencia'] else ""}
 
@@ -79,25 +84,20 @@ def enviar_a_telegram(imagen_bytes, datos_pedido):
     except Exception:
         return False
 
-# --- FUNCIÓN 4: GUARDAR EN GOOGLE SHEETS (NUEVA) ---
+# --- FUNCIÓN 4: GUARDAR EN GOOGLE SHEETS ---
 def guardar_venta_sheets(datos):
-    # Si no configuraron los secretos de Google, no hacemos nada y no damos error
     if "gcp_service_account" not in st.secrets:
         return False
-    
     try:
-        # Conectar con Google
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-        creds_dict = dict(st.secrets["gcp_service_account"]) # Convertir secretos a diccionario
+        creds_dict = dict(st.secrets["gcp_service_account"])
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
         
-        # Abrir la hoja (Asegúrate que el nombre sea EXACTO)
         sheet = client.open("Ventas Ela 2025").sheet1
-        
-        # Preparar la fila con Fecha/Hora actual
         fecha_hora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
+        # Orden de columnas: A=Fecha, B=Cliente, C=Producto, D=Pago, E=Monto, F=Moneda, G=Ref, H=Entrega, I=Tel, J=Vendedor, K=Estado
         fila = [
             fecha_hora,
             datos['nombre'],
@@ -107,14 +107,14 @@ def guardar_venta_sheets(datos):
             datos['moneda'],
             datos['referencia'],
             datos['tipo_entrega'],
-            datos['telefono']
+            datos['telefono'],
+            datos['vendedor'], # Columna J
+            datos['estado']    # Columna K
         ]
-        
-        # Agregar al final
         sheet.append_row(fila)
         return True
     except Exception as e:
-        st.error(f"Error guardando venta: {e}")
+        st.error(f"Error Sheets: {e}")
         return False
 
 # --- CONFIGURACIÓN DE PÁGINA ---
@@ -126,6 +126,8 @@ st.markdown("""
     .stButton>button { width: 100%; background-color: #1E3A8A; color: white; border-radius: 8px; font-weight: bold; padding: 0.75rem; border: none; }
     .stButton>button:hover { background-color: #152C6B; }
     .pago-box { background-color: #f0fdf4; padding: 15px; border-radius: 8px; border: 1px solid #bbf7d0; margin-bottom: 15px; }
+    /* Alerta de Crédito */
+    .credito-box { background-color: #fee2e2; color: #991b1b; padding: 10px; border-radius: 8px; border: 1px solid #fca5a5; font-weight: bold; text-align: center; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -153,6 +155,10 @@ if not st.session_state.pedido_procesado:
         st.divider()
         st.markdown("Desarrollado para **Ela Live Laser Bar** 💎")
 
+    # --- SELECCIÓN DE VENDEDOR (NUEVO) ---
+    st.markdown("### 👨‍💼 ¿Quién atiende?")
+    vendedor = st.selectbox("", ["Celene", "Alexander", "Ali", "Greysi", "Otro"], label_visibility="collapsed")
+
     st.markdown("### 1️⃣ Sube la foto")
     uploaded_file = st.file_uploader("", type=['jpg', 'png', 'jpeg'], label_visibility="collapsed")
 
@@ -170,37 +176,57 @@ if not st.session_state.pedido_procesado:
 
         texto_reverso = st.text_input("📝 Grabado reverso (Opcional)", placeholder="Ej: Te amo mamá 2025")
 
+        # --- LÓGICA DE PAGOS INTELIGENTE ---
         st.markdown("#### 💳 Forma de Pago")
-        lista_pagos = ["Divisas en Efectivo", "Pago Móvil (Bolívares)", "Binance", "Zelle", "Bancolombia", "Depósito Divisas", "Otro"]
+        lista_pagos = ["Divisas en Efectivo", "Pago Móvil (Bolívares)", "Binance", "Zelle", "Bancolombia", "Depósito Divisas", "⛔ A Crédito / Pendiente", "Otro"]
         metodo_pago = st.selectbox("Seleccione método:", lista_pagos)
 
         moneda_simbolo = "$"
         mostrar_ref = False
+        estado_pago = "Pagado" # Por defecto
 
-        if metodo_pago == "Divisas en Efectivo":
+        # 1. CASO CRÉDITO (SIMPLIFICADO)
+        if metodo_pago == "⛔ A Crédito / Pendiente":
+            estado_pago = "Pendiente"
+            st.markdown('<div class="credito-box">⚠️ ESTE PEDIDO QUEDARÁ COMO DEUDA PENDIENTE</div>', unsafe_allow_html=True)
+            # Preguntamos moneda de la deuda
+            moneda_seleccion = st.radio("Moneda de la deuda:", ["Dólares (USD)", "Pesos (COP)", "Bolívares (Bs)"], horizontal=True)
+            if "Dólares" in moneda_seleccion: moneda_simbolo = "USD"
+            elif "Pesos" in moneda_seleccion: moneda_simbolo = "COP"
+            else: moneda_simbolo = "Bs"
+        
+        # 2. CASOS PAGADOS
+        elif metodo_pago == "Divisas en Efectivo":
             moneda_seleccion = st.radio("Moneda de entrega:", ["Dólares (USD)", "Pesos (COP)"], horizontal=True)
             moneda_simbolo = "USD" if "Dólares" in moneda_seleccion else "COP"
+        
         elif metodo_pago == "Pago Móvil (Bolívares)":
             moneda_simbolo = "Bs"
             mostrar_ref = True
             st.markdown('<div class="pago-box">⬇️ <b>Datos Bancamiga</b><br>0414-7351289<br>26493459</div>', unsafe_allow_html=True)
+        
         elif metodo_pago == "Binance":
             moneda_simbolo = "USDT"
             mostrar_ref = True
+        
         elif metodo_pago == "Zelle":
             moneda_simbolo = "USD"
             mostrar_ref = True
+        
         elif metodo_pago == "Bancolombia":
             moneda_simbolo = "COP"
             mostrar_ref = True
 
         c_monto, c_ref = st.columns(2)
         with c_monto:
-            monto_pago = st.text_input(f"💰 Monto Total ({moneda_simbolo}) *", placeholder="0.00")
+            label_monto = "💰 Monto Deuda" if estado_pago == "Pendiente" else "💰 Monto Total"
+            monto_pago = st.text_input(f"{label_monto} ({moneda_simbolo}) *", placeholder="0.00")
         with c_ref:
             referencia_pago = ""
             if mostrar_ref:
-                referencia_pago = st.text_input("🔢 Nro Referencia / Capture", placeholder="Últimos 4 dígitos")
+                referencia_pago = st.text_input("🔢 Nro Referencia", placeholder="Últimos 4 dígitos")
+            elif estado_pago == "Pendiente":
+                st.write("") # Espacio vacío para que se vea ordenado
 
         st.markdown("#### 🚚 Entrega")
         tipo_entrega = st.radio("Método:", ["En persona (Tienda)", "Con Envío"], horizontal=True)
@@ -237,7 +263,7 @@ if not st.session_state.pedido_procesado:
 
                     with st.status("🤖 Trabajando...", expanded=True) as status:
                         try:
-                            # PROCESAMIENTO (Resumido)
+                            # PROCESAMIENTO
                             img_safe = redimensionar_imagen_segura(image_original)
                             buf_safe = BytesIO()
                             img_safe.save(buf_safe, format="PNG")
@@ -297,6 +323,8 @@ if not st.session_state.pedido_procesado:
                             st.session_state.resultado_imagen = buf_final.getvalue()
                             
                             datos = {
+                                "vendedor": vendedor,
+                                "estado": estado_pago,
                                 "nombre": nombre_cliente,
                                 "producto": tipo_producto,
                                 "reverso": texto_reverso if texto_reverso else "N/A",
@@ -310,19 +338,19 @@ if not st.session_state.pedido_procesado:
                             }
                             st.session_state.datos_pedido_guardados = datos
 
-                            # ENVIAR A TELEGRAM
+                            # TELEGRAM
                             if st.secrets.get("TELEGRAM_TOKEN"):
                                 status.write("🚀 Enviando a Taller...")
                                 enviar_a_telegram(st.session_state.resultado_imagen, datos)
                             
-                            # GUARDAR EN SHEETS
+                            # SHEETS
                             if "gcp_service_account" in st.secrets:
                                 status.write("📊 Registrando venta...")
                                 guardado = guardar_venta_sheets(datos)
                                 if guardado:
                                     status.write("✅ Venta Guardada")
                                 else:
-                                    status.write("❌ No se pudo guardar venta")
+                                    status.write("⚠️ Venta no registrada (Error Sheets)")
 
                             st.session_state.pedido_procesado = True
                             st.rerun()
@@ -336,7 +364,9 @@ if not st.session_state.pedido_procesado:
 else:
     st.balloons()
     nombre = st.session_state.datos_pedido_guardados['nombre']
-    st.success(f"✅ ¡Pedido de {nombre} enviado y registrado!")
+    vend = st.session_state.datos_pedido_guardados['vendedor']
+    
+    st.success(f"✅ Pedido de {nombre} enviado (Atendido por {vend})")
     
     st.image(st.session_state.resultado_imagen, caption="Listo", use_column_width=True)
     
