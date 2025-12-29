@@ -3,3 +3,5 @@ replicate
 Pillow
 numpy
 requests
+gspread
+oauth2client
