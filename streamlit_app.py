@@ -5,26 +5,26 @@ from PIL import Image, ImageEnhance
 from io import BytesIO
 import base64
 import random
+from datetime import datetime
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
-# --- GESTIÓN DE ESTADO (MEMORIA DE LA APP) ---
-# Esto permite que la app recuerde si ya procesó un pedido o no
+# --- GESTIÓN DE ESTADO ---
 if 'pedido_procesado' not in st.session_state:
     st.session_state.pedido_procesado = False
 if 'resultado_imagen' not in st.session_state:
     st.session_state.resultado_imagen = None
 if 'datos_pedido_guardados' not in st.session_state:
     st.session_state.datos_pedido_guardados = {}
-# Generamos los números del captcha solo una vez por sesión
 if 'captcha_num1' not in st.session_state:
     st.session_state.captcha_num1 = random.randint(1, 10)
     st.session_state.captcha_num2 = random.randint(1, 10)
 
-# --- FUNCIÓN PARA REINICIAR (NUEVO PEDIDO) ---
+# --- FUNCIÓN REINICIAR ---
 def reiniciar_app():
     st.session_state.pedido_procesado = False
     st.session_state.resultado_imagen = None
     st.session_state.datos_pedido_guardados = {}
-    # Generar nuevo captcha
     st.session_state.captcha_num1 = random.randint(1, 10)
     st.session_state.captcha_num2 = random.randint(1, 10)
     st.rerun()
@@ -53,7 +53,6 @@ def redimensionar_imagen_segura(image, max_pixels=2000000):
 def enviar_a_telegram(imagen_bytes, datos_pedido):
     if "TELEGRAM_TOKEN" not in st.secrets or "TELEGRAM_CHAT_ID" not in st.secrets:
         return False
-
     token = st.secrets["TELEGRAM_TOKEN"]
     chat_id = st.secrets["TELEGRAM_CHAT_ID"]
     url = f"https://api.telegram.org/bot{token}/sendDocument"
@@ -71,35 +70,65 @@ def enviar_a_telegram(imagen_bytes, datos_pedido):
 🚚 *Entrega:* {datos_pedido['tipo_entrega']}
 {f"📍 *Dirección:* {datos_pedido['direccion']}" if datos_pedido['direccion'] else ""}
 {f"📞 *Teléfono:* {datos_pedido['telefono']}" if datos_pedido['telefono'] else ""}
-
-✨ _Pedido verificado por Captcha_
 """
     files = {'document': ('pedido_ela.png', imagen_bytes, 'image/png')}
     data = {'chat_id': chat_id, 'caption': mensaje, 'parse_mode': 'Markdown'}
-    
     try:
         r = requests.post(url, files=files, data=data)
         return r.status_code == 200
     except Exception:
         return False
 
+# --- FUNCIÓN 4: GUARDAR EN GOOGLE SHEETS (NUEVA) ---
+def guardar_venta_sheets(datos):
+    # Si no configuraron los secretos de Google, no hacemos nada y no damos error
+    if "gcp_service_account" not in st.secrets:
+        return False
+    
+    try:
+        # Conectar con Google
+        scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+        creds_dict = dict(st.secrets["gcp_service_account"]) # Convertir secretos a diccionario
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(creds)
+        
+        # Abrir la hoja (Asegúrate que el nombre sea EXACTO)
+        sheet = client.open("Ventas Ela 2025").sheet1
+        
+        # Preparar la fila con Fecha/Hora actual
+        fecha_hora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        fila = [
+            fecha_hora,
+            datos['nombre'],
+            datos['producto'],
+            datos['metodo_pago'],
+            datos['monto'],
+            datos['moneda'],
+            datos['referencia'],
+            datos['tipo_entrega'],
+            datos['telefono']
+        ]
+        
+        # Agregar al final
+        sheet.append_row(fila)
+        return True
+    except Exception as e:
+        st.error(f"Error guardando venta: {e}")
+        return False
+
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Ela Grabado Pro", page_icon="💎", layout="centered")
 
-# --- ESTILOS VISUALES ---
 st.markdown("""
     <style>
     .main-title { color: #1E3A8A; text-align: center; font-family: sans-serif; margin-top: -20px; }
-    .subtitle { text-align: center; color: #6B7280; margin-bottom: 30px; }
     .stButton>button { width: 100%; background-color: #1E3A8A; color: white; border-radius: 8px; font-weight: bold; padding: 0.75rem; border: none; }
     .stButton>button:hover { background-color: #152C6B; }
     .pago-box { background-color: #f0fdf4; padding: 15px; border-radius: 8px; border: 1px solid #bbf7d0; margin-bottom: 15px; }
-    /* Estilo para el botón de nuevo pedido (Gris) */
-    .stButton>button.secondary { background-color: #6B7280; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- ENCABEZADO ---
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
     try:
@@ -110,16 +139,13 @@ with col2:
 st.markdown('<h1 class="main-title">Ela Grabado de Joyería</h1>', unsafe_allow_html=True)
 
 # ==========================================
-#  VISTA 1: FORMULARIO (Si no se ha procesado)
+#  VISTA 1: FORMULARIO
 # ==========================================
 if not st.session_state.pedido_procesado:
     
-    st.markdown('<p class="subtitle">✨ Sistema de Pedidos y Diseño</p>', unsafe_allow_html=True)
-
-    # --- BARRA LATERAL ---
     with st.sidebar:
         st.header("🎛️ Panel de Imagen")
-        usar_hd = st.checkbox("Activar HD (Super Resolución)", value=True)
+        usar_hd = st.checkbox("Activar HD", value=True)
         ayuda_sombras = st.slider("Revelar Sombras", 1.0, 2.0, 1.0)
         st.subheader("Acabado Láser")
         nitidez = st.slider("Nitidez", 0.0, 5.0, 2.0)
@@ -127,7 +153,6 @@ if not st.session_state.pedido_procesado:
         st.divider()
         st.markdown("Desarrollado para **Ela Live Laser Bar** 💎")
 
-    # --- FORMULARIO ---
     st.markdown("### 1️⃣ Sube la foto")
     uploaded_file = st.file_uploader("", type=['jpg', 'png', 'jpeg'], label_visibility="collapsed")
 
@@ -179,39 +204,30 @@ if not st.session_state.pedido_procesado:
 
         st.markdown("#### 🚚 Entrega")
         tipo_entrega = st.radio("Método:", ["En persona (Tienda)", "Con Envío"], horizontal=True)
-
         direccion_envio = ""
         telefono_contacto = ""
-
         if tipo_entrega == "Con Envío":
             st.info("📦 Datos de Envío")
             direccion_envio = st.text_area("Dirección:", placeholder="Calle, Casa...")
             telefono_contacto = st.text_input("Teléfono:", placeholder="04XX-XXXXXXX")
 
         st.divider()
-        
-        # --- CAPTCHA SENCILLO ---
-        st.markdown("#### 🛡️ Verificación de Seguridad")
+        st.markdown("#### 🛡️ Verificación")
         c_captcha1, c_captcha2 = st.columns([2, 1])
         with c_captcha1:
             st.write(f"¿Cuánto es **{st.session_state.captcha_num1} + {st.session_state.captcha_num2}**?")
         with c_captcha2:
             respuesta_captcha = st.number_input("Respuesta", min_value=0, max_value=100, step=1, label_visibility="collapsed")
         
-        # --- BOTÓN DE PROCESAR ---
-        if st.button("💎 PROCESAR Y ENVIAR PEDIDO"):
-            
-            # 1. Validar Captcha
+        if st.button("💎 PROCESAR, ENVIAR Y REGISTRAR"):
             suma_correcta = st.session_state.captcha_num1 + st.session_state.captcha_num2
             
             if respuesta_captcha != suma_correcta:
-                st.error("❌ La respuesta de la suma es incorrecta. Intenta de nuevo.")
+                st.error("❌ Captcha incorrecto.")
             else:
-                # 2. Validar Campos
                 errores = []
-                if not nombre_cliente: errores.append("Falta el Nombre del Cliente.")
-                if not monto_pago: errores.append("Falta el Monto del Pago.")
-                    
+                if not nombre_cliente: errores.append("Falta Nombre.")
+                if not monto_pago: errores.append("Falta Monto.")
                 if errores:
                     for error in errores: st.error(f"⚠️ {error}")
                 else:
@@ -219,9 +235,9 @@ if not st.session_state.pedido_procesado:
                         st.error("⚠️ Error API.")
                         st.stop()
 
-                    with st.status("🤖 Procesando pedido...", expanded=True) as status:
+                    with st.status("🤖 Trabajando...", expanded=True) as status:
                         try:
-                            # --- PROCESO IA ---
+                            # PROCESAMIENTO (Resumido)
                             img_safe = redimensionar_imagen_segura(image_original)
                             buf_safe = BytesIO()
                             img_safe.save(buf_safe, format="PNG")
@@ -238,7 +254,7 @@ if not st.session_state.pedido_procesado:
                                 img_input = buf
 
                             if usar_hd:
-                                status.write("1️⃣ Mejorando calidad (HD)...")
+                                status.write("1️⃣ Mejorando calidad...")
                                 output_upscale = replicate.run(
                                     "nightmareai/real-esrgan:42fed1c4974146d4d2414e2be2c5277c7fcf05fcc3a73abf41610695738c1d7b",
                                     input={"image": img_input, "scale": 2, "face_enhance": True}
@@ -255,7 +271,7 @@ if not st.session_state.pedido_procesado:
                                 buffer_hd.seek(0)
                                 img_input = buffer_hd
 
-                            status.write("2️⃣ Recortando fondo...")
+                            status.write("2️⃣ Cortando fondo...")
                             output_bria = replicate.run(
                                 "bria/remove-background",
                                 input={"image": img_input, "preserve_alpha": True}
@@ -276,12 +292,11 @@ if not st.session_state.pedido_procesado:
                             enhancer_s = ImageEnhance.Sharpness(img_proc)
                             img_proc = enhancer_s.enhance(nitidez)
 
-                            # Guardar en Session State
                             buf_final = BytesIO()
                             img_proc.save(buf_final, format="PNG")
                             st.session_state.resultado_imagen = buf_final.getvalue()
                             
-                            st.session_state.datos_pedido_guardados = {
+                            datos = {
                                 "nombre": nombre_cliente,
                                 "producto": tipo_producto,
                                 "reverso": texto_reverso if texto_reverso else "N/A",
@@ -293,15 +308,22 @@ if not st.session_state.pedido_procesado:
                                 "direccion": direccion_envio,
                                 "telefono": telefono_contacto
                             }
+                            st.session_state.datos_pedido_guardados = datos
 
-                            # --- TELEGRAM ---
+                            # ENVIAR A TELEGRAM
                             if st.secrets.get("TELEGRAM_TOKEN"):
-                                status.write("🚀 Enviando recibo a Telegram...")
-                                enviar_a_telegram(st.session_state.resultado_imagen, st.session_state.datos_pedido_guardados)
+                                status.write("🚀 Enviando a Taller...")
+                                enviar_a_telegram(st.session_state.resultado_imagen, datos)
                             
-                            status.update(label="✅ ¡Listo!", state="complete")
-                            
-                            # CAMBIAR ESTADO A PROCESADO Y RECARGAR
+                            # GUARDAR EN SHEETS
+                            if "gcp_service_account" in st.secrets:
+                                status.write("📊 Registrando venta...")
+                                guardado = guardar_venta_sheets(datos)
+                                if guardado:
+                                    status.write("✅ Venta Guardada")
+                                else:
+                                    status.write("❌ No se pudo guardar venta")
+
                             st.session_state.pedido_procesado = True
                             st.rerun()
 
@@ -309,30 +331,18 @@ if not st.session_state.pedido_procesado:
                             st.error(f"Error: {e}")
 
 # ==========================================
-#  VISTA 2: RESULTADO (Éxito)
+#  VISTA 2: RESULTADO
 # ==========================================
 else:
-    st.balloons() # 🎉 Efecto de celebración
-    st.success(f"✅ ¡Pedido de {st.session_state.datos_pedido_guardados['nombre']} enviado correctamente!")
+    st.balloons()
+    nombre = st.session_state.datos_pedido_guardados['nombre']
+    st.success(f"✅ ¡Pedido de {nombre} enviado y registrado!")
     
-    st.markdown("### 🖼️ Resultado Final")
-    # Mostramos la imagen guardada en memoria
-    st.image(st.session_state.resultado_imagen, caption="Listo para grabar", use_column_width=True)
+    st.image(st.session_state.resultado_imagen, caption="Listo", use_column_width=True)
     
-    # Columnas para los botones finales
-    col_descargar, col_nuevo = st.columns(2)
-    
-    with col_descargar:
-        st.download_button(
-            label="⬇️ DESCARGAR IMAGEN", 
-            data=st.session_state.resultado_imagen, 
-            file_name=f"pedido_{st.session_state.datos_pedido_guardados['nombre']}.png", 
-            mime="image/png"
-        )
-        
-    with col_nuevo:
-        # Este botón reinicia la app para el siguiente cliente
-        if st.button("🔄 PROCESAR NUEVO PEDIDO"):
+    col1, col2 = st.columns(2)
+    with col1:
+        st.download_button("⬇️ DESCARGAR", data=st.session_state.resultado_imagen, file_name=f"pedido_{nombre}.png", mime="image/png")
+    with col2:
+        if st.button("🔄 NUEVO PEDIDO"):
             reiniciar_app()
-    
-    st.info("ℹ️ La pantalla se ha limpiado por seguridad. Si necesitas hacer otro pedido, dale al botón de arriba.")
