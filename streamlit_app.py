@@ -37,9 +37,8 @@ def reiniciar_app():
     st.session_state.nombre_cliente_guardado = ""
     st.rerun()
 
-# --- UTILS (AQUÍ ESTÁ EL ARREGLO) ---
+# --- UTILS (CON LÍMITE DE 1 MILLÓN DE PIXELES) ---
 def redimensionar_imagen_segura(image, max_pixels=1000000): 
-    # CAMBIO: Bajamos de 2 millones a 1 millón para evitar error CUDA Out of Memory
     width, height = image.size
     total_pixels = width * height
     if total_pixels > max_pixels:
@@ -78,6 +77,8 @@ st.markdown("""
     .instruccion { text-align: center; color: #555; font-size: 0.9em; margin-bottom: 20px; }
     .stButton>button { width: 100%; background-color: #1E3A8A; color: white; border-radius: 20px; font-weight: bold; padding: 0.75rem; border: none; }
     .stButton>button:hover { background-color: #152C6B; }
+    /* Botón secundario (Nuevo Cliente) en gris */
+    .stButton>button.secondary { background-color: #6B7280; } 
     </style>
 """, unsafe_allow_html=True)
 
@@ -126,8 +127,7 @@ if not st.session_state.pedido_procesado:
                         # PROCESAMIENTO
                         image_original = Image.open(uploaded_file)
                         
-                        # --- PASO CRÍTICO: REDIMENSIONAR ---
-                        # Aquí aplicamos la nueva "dieta" de píxeles
+                        # REDIMENSIONAR (SEGURIDAD)
                         img_safe = redimensionar_imagen_segura(image_original)
                         
                         buf_safe = BytesIO()
@@ -142,7 +142,6 @@ if not st.session_state.pedido_procesado:
                             {"image": img_input, "scale": 2, "face_enhance": True}
                         )
                         
-                        # Lectura segura
                         buffer_hd = BytesIO()
                         if isinstance(output_upscale, str):
                             resp = requests.get(output_upscale)
@@ -179,38 +178,4 @@ if not st.session_state.pedido_procesado:
                         enhancer_s = ImageEnhance.Sharpness(img_proc)
                         img_proc = enhancer_s.enhance(2.0)
 
-                        buf_final = BytesIO()
-                        img_proc.save(buf_final, format="PNG")
-                        st.session_state.resultado_imagen = buf_final.getvalue()
-                        st.session_state.nombre_cliente_guardado = nombre_cliente
-
-                        # TELEGRAM (Silencioso)
-                        if st.secrets.get("TELEGRAM_TOKEN"):
-                            status.write("🚀 Enviando al taller...")
-                            enviar_a_telegram(st.session_state.resultado_imagen, nombre_cliente, texto_reverso if texto_reverso else "N/A")
-                        
-                        st.session_state.pedido_procesado = True
-                        st.rerun()
-
-                    except Exception as e:
-                        # Si sigue fallando, mostramos el error técnico solo si es necesario
-                        if "CUDA" in str(e):
-                             st.error("⚠️ La imagen es demasiado pesada incluso para la IA. Por favor intenta recortarla un poco en tu galería antes de subirla.")
-                        else:
-                             st.error("Hubo un pequeño error técnico. Intenta de nuevo.")
-
-# ==========================================
-#  VISTA CLIENTE (RESULTADO)
-# ==========================================
-else:
-    st.balloons()
-    nombre = st.session_state.nombre_cliente_guardado
-    st.success(f"¡Excelente {nombre}! Tu imagen ya está en nuestro taller.")
-    
-    st.markdown("### 👇 Así quedó tu diseño:")
-    st.image(st.session_state.resultado_imagen, use_column_width=True)
-    
-    st.info("Acércate al mostrador para finalizar tu joya. 💎")
-    
-    if st.button("🔄 Hacer otro diseño"):
-        reiniciar_app()
+                        buf_final
