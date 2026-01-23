@@ -178,4 +178,49 @@ if not st.session_state.pedido_procesado:
                         enhancer_s = ImageEnhance.Sharpness(img_proc)
                         img_proc = enhancer_s.enhance(2.0)
 
-                        buf_final
+                        # --- AQUI ESTABA EL ERROR DE ESPACIOS, YA CORREGIDO ---
+                        buf_final = BytesIO()
+                        img_proc.save(buf_final, format="PNG")
+                        st.session_state.resultado_imagen = buf_final.getvalue()
+                        st.session_state.nombre_cliente_guardado = nombre_cliente
+
+                        # TELEGRAM
+                        if st.secrets.get("TELEGRAM_TOKEN"):
+                            status.write("🚀 Enviando al taller...")
+                            enviar_a_telegram(st.session_state.resultado_imagen, nombre_cliente, texto_reverso if texto_reverso else "N/A")
+                        
+                        st.session_state.pedido_procesado = True
+                        st.rerun()
+
+                    except Exception as e:
+                        if "CUDA" in str(e):
+                             st.error("⚠️ Imagen demasiado pesada. Intenta recortarla un poco.")
+                        else:
+                             st.error("Hubo un pequeño error técnico. Intenta de nuevo.")
+
+# ==========================================
+#  VISTA CLIENTE (RESULTADO)
+# ==========================================
+else:
+    st.balloons()
+    nombre = st.session_state.nombre_cliente_guardado
+    st.success(f"¡Excelente {nombre}! Tu imagen ya está lista.")
+    
+    st.image(st.session_state.resultado_imagen, use_column_width=True)
+    
+    st.info("💎 Muestra esta pantalla en el mostrador.")
+    
+    # --- BOTONES FINALES ---
+    col_descarga, col_nuevo = st.columns(2)
+    
+    with col_descarga:
+        st.download_button(
+            label="⬇️ DESCARGAR MI IMAGEN", 
+            data=st.session_state.resultado_imagen, 
+            file_name=f"ela_diseno_{nombre}.png", 
+            mime="image/png"
+        )
+    
+    with col_nuevo:
+        if st.button("🔄 NUEVO CLIENTE"):
+            reiniciar_app()
